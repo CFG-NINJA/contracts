@@ -884,7 +884,8 @@ contract Junkie is Context, IERC20, Ownable,ReentrancyGuard {
 
 	//leave as default and dont modify it.
     uint256 public marketingTokensCollected = 0;
-
+    uint256 public lastSwapTime;
+    uint256 public swapCooldown = 5 minutes;
 
     uint256 public minimumTokensBeforeSwap = 100_000_000 ether;
 
@@ -1087,6 +1088,8 @@ contract Junkie is Context, IERC20, Ownable,ReentrancyGuard {
     //Swap Tokens for BNB or to add liquidity either automatically or manual, due to SAFU this was changed to Automatic after enable trading.
     //Corrected newBalance bug, it sending bnb to wallet and any remaining is on contract and can be recoverred.
     function swapAndLiquify() public lockTheSwap {
+        require(block.timestamp >= lastSwapTime + swapCooldown, "Swap on cooldown");
+        lastSwapTime = block.timestamp;
         uint256 totalTokens = balanceOf(address(this));
         swapTokensForEth(totalTokens);
         uint ethBalance = address(this).balance;
