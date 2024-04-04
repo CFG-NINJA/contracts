@@ -81,13 +81,6 @@ abstract contract ReentrancyGuard {
         _status = NOT_ENTERED;
     }
 
-    /**
-     * @dev Returns true if the reentrancy guard is currently set to "entered", which indicates there is a
-     * `nonReentrant` function in the call stack.
-     */
-    function _reentrancyGuardEntered() internal view returns (bool) {
-        return _status == ENTERED;
-    }
 }
 interface IERC20 {
     function totalSupply() external view returns (uint256);
@@ -544,22 +537,14 @@ contract Junkie is Context, IERC20, Ownable,ReentrancyGuard {
     //Loging and Event Information for better troubleshooting.
     event ExcludeStatus(address, bool);
     event UpdateMarketingWallet(address);
-    event UpdateStakingWallet(address);
     event UpdateTokensToSwap(uint256);
     event UpdateBuyFee(uint256);
     event UpdateSellFee(uint256);
     event UpdateTransferFee(uint256);
     event TransferStatus(bool);
-    event UpdateDistribution(uint256, uint256);
     event RecoveredETH(uint256);
-    event RecoveredTokens(uint256);
-    event TradingStarted(bool);												
+    event RecoveredTokens(uint256);											
     event SwapAndLiquifyEnabledUpdated(bool enabled);
-    event SwapAndLiquify(
-        uint256 tokensSwapped,
-        uint256 ethReceived,
-        uint256 tokensIntoLiqudity
-    );
     event SwapTokensForETH(uint256 amountIn, address[] path);
 
 
