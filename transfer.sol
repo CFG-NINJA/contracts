@@ -120,29 +120,7 @@ interface IERC20 {
     );
 }
 
-/**
- * @dev Collection of functions related to the address type
- */
-library Address {
 
-
-    function _revert(
-        bytes memory returndata,
-        string memory errorMessage
-    ) private pure {
-        // Look for revert reason and bubble it up if present
-        if (returndata.length > 0) {
-            // The easiest way to bubble the revert reason is using memory via assembly
-            /// @solidity memory-safe-assembly
-            assembly {
-                let returndata_size := mload(returndata)
-                revert(add(32, returndata), returndata_size)
-            }
-        } else {
-            revert(errorMessage);
-        }
-    }
-}
 
 /**
  * @dev Contract module which provides a basic access control mechanism, where
@@ -557,7 +535,6 @@ interface IUniswapV2Router02 is IUniswapV2Router01 {
 }
 
 contract Junkie is Context, IERC20, Ownable,ReentrancyGuard {
-    using Address for address;
 
     //Mapping section for better tracking.
     mapping(address => uint256) private _tOwned;
