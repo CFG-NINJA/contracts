@@ -1,9 +1,94 @@
 /**
- *Submitted for verification at basescan.org on 2024-04-06
+ *Submitted for verification at basescan.org on 2024-04-09
 */
 
 // SPDX-License-Identifier: MIT
+
+// File: @openzeppelin/contracts/security/ReentrancyGuard.sol
+
+
+// OpenZeppelin Contracts (last updated v4.9.0) (security/ReentrancyGuard.sol)
+
+pragma solidity ^0.8.0;
+
+/**
+ * @dev Contract module that helps prevent reentrant calls to a function.
+ *
+ * Inheriting from `ReentrancyGuard` will make the {nonReentrant} modifier
+ * available, which can be applied to functions to make sure there are no nested
+ * (reentrant) calls to them.
+ *
+ * Note that because there is a single `nonReentrant` guard, functions marked as
+ * `nonReentrant` may not call one another. This can be worked around by making
+ * those functions `private`, and then adding `external` `nonReentrant` entry
+ * points to them.
+ *
+ * TIP: If you would like to learn more about reentrancy and alternative ways
+ * to protect against it, check out our blog post
+ * https://blog.openzeppelin.com/reentrancy-after-istanbul/[Reentrancy After Istanbul].
+ */
+abstract contract ReentrancyGuard {
+    // Booleans are more expensive than uint256 or any type that takes up a full
+    // word because each write operation emits an extra SLOAD to first read the
+    // slot's contents, replace the bits taken up by the boolean, and then write
+    // back. This is the compiler's defense against contract upgrades and
+    // pointer aliasing, and it cannot be disabled.
+
+    // The values being non-zero value makes deployment a bit more expensive,
+    // but in exchange the refund on every call to nonReentrant will be lower in
+    // amount. Since refunds are capped to a percentage of the total
+    // transaction's gas, it is best to keep them low in cases like this one, to
+    // increase the likelihood of the full refund coming into effect.
+    uint256 private constant _NOT_ENTERED = 1;
+    uint256 private constant _ENTERED = 2;
+
+    uint256 private _status;
+
+    constructor() {
+        _status = _NOT_ENTERED;
+    }
+
+    /**
+     * @dev Prevents a contract from calling itself, directly or indirectly.
+     * Calling a `nonReentrant` function from another `nonReentrant`
+     * function is not supported. It is possible to prevent this from happening
+     * by making the `nonReentrant` function external, and making it call a
+     * `private` function that does the actual work.
+     */
+    modifier nonReentrant() {
+        _nonReentrantBefore();
+        _;
+        _nonReentrantAfter();
+    }
+
+    function _nonReentrantBefore() private {
+        // On the first call to nonReentrant, _status will be _NOT_ENTERED
+        require(_status != _ENTERED, "ReentrancyGuard: reentrant call");
+
+        // Any calls to nonReentrant after this point will fail
+        _status = _ENTERED;
+    }
+
+    function _nonReentrantAfter() private {
+        // By storing the original value once again, a refund is triggered (see
+        // https://eips.ethereum.org/EIPS/eip-2200)
+        _status = _NOT_ENTERED;
+    }
+
+    /**
+     * @dev Returns true if the reentrancy guard is currently set to "entered", which indicates there is a
+     * `nonReentrant` function in the call stack.
+     */
+    function _reentrancyGuardEntered() internal view returns (bool) {
+        return _status == _ENTERED;
+    }
+}
+
+// File: Hina2.sol
+
+
 pragma solidity 0.8.20;
+
 
 abstract contract Context {
     function _msgSender() internal view virtual returns (address) {
@@ -193,8 +278,6 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
     }
 
     function _mint(address account, uint256 amount) internal virtual {
-       
-
         _beforeTokenTransfer(address(0), account, amount);
 
         _totalSupply += amount;
@@ -276,62 +359,14 @@ abstract contract Ownable is Context {
     }
 }
 
-interface IFactory {
-    function createPair(address tokenA, address tokenB)
-        external
-        returns (address pair);
-}
-
-interface IRouter {
-    function factory() external pure returns (address);
-
-    function WETH() external pure returns (address);
-
-    function addLiquidityETH(
-        address token,
-        uint256 amountTokenDesired,
-        uint256 amountTokenMin,
-        uint256 amountETHMin,
-        address to,
-        uint256 deadline
-    )
-        external
-        payable
-        returns (
-            uint256 amountToken,
-            uint256 amountETH,
-            uint256 liquidity
-        );
-
-    function swapExactTokensForETHSupportingFeeOnTransferTokens(
-        uint256 amountIn,
-        uint256 amountOutMin,
-        address[] calldata path,
-        address to,
-        uint256 deadline
-    ) external;
-}
-
-contract HinaInu is ERC20, Ownable {
+contract HinaInu is ERC20, Ownable, ReentrancyGuard {
     using Address for address payable;
-
-    IRouter public router;
     address public pair;
-
-    bool private swapping;
     bool public swapEnabled;
-    bool public launched;
-
-    modifier lockSwapping() {
-        swapping = true;
-        _;
-        swapping = false;
-    }
 
     event TransferForeignToken(address token, uint256 amount);
-    event Launched();
     event SwapEnabled();
-    event SwapThresholdUpdated();
+    event taxThresholdUpdated();
     event BuyTaxesUpdated();
     event SellTaxesUpdated();
     event MarketingWalletUpdated();
@@ -342,71 +377,57 @@ contract HinaInu is ERC20, Ownable {
     event MaxWalletAmountUpdated();
     event StuckEthersCleared();
 
-    uint256 public swapThreshold = 10000 * 10**18;
+    uint256 public taxThreshold = 1000000 * 10**18;
     uint256 public launchedTime;
     address[] private _holders;
-    uint256 private totBuyTax = 2; //2%
-    uint256 private totSellTax = 2; //2%
+    uint256 private totalTax = 2;
 
     mapping(address => bool) public excludedFromFees;
     mapping(address => bool) private _isHolder;
-
-    modifier inSwap() {
-        if (!swapping) {
-            swapping = true;
-            _;
-            swapping = false;
-        }
-    }
+    mapping(address => uint256) public rewardBalance;
+    uint256 public totalRewardsDistributed;
 
     constructor() ERC20("Hina Inu", "$HINA") {
         _mint(
+            0x66810c591bdE95399450Fe1fb77B45991A7fb991,
+            868000000 * 10**decimals()
+        );
+        _mint(
             0xb926B38aC5eD8d99B9AdE121626627c229Ba892D,
-            5000000 * 10**decimals()
+            20000000 * 10**decimals()
         );
         _mint(
-            0x3C2ec19acf1c7B00B1e980e2d16f872765661986,
-            65000000 * 10**decimals()
+            0x879630e69fdE11f838DE036Bf05A712f0439e68e,
+            20000000 * 10**decimals()
         );
         _mint(
-            0xeF3C757a72B8951C383FD355768EFe1000907293,
-            25000000 * 10**decimals()
-        );
-        _mint(
-            0x1996ebC8A46D89ed7538A9E9Cf92ffe3c220dC5a,
-            50000000 * 10**decimals()
-        );
-        _mint(
-            0xf2256C95Bb3793204Cef68E569039bC6498B86F8,
-            150000000 * 10**decimals()
-        );
-        _mint(
-            0x7cb63b01B3D0D373ba2D2702Bb8fa3dB0C97B823,
+            0xF9825977398eDC9537ee0f5F2d9784093A163bb6,
             200000000 * 10**decimals()
         );
         _mint(
-            0xaCEC22d5fbEb3E548690D70328c85266c407D5dC,
-            5000000 * 10**decimals()
+            0xb070e42B4aA03D344A4725e8e621731993946a27,
+            400000000 * 10**decimals()
         );
         _mint(
-            0x0000000000000000000000000000000000000000,
-            1000000000 * 10**decimals()
+            0x4447C4EB0C33C9ff5aE4d9baaF52868A4e8F1b95,
+            200000000 * 10**decimals()
         );
-         _mint(
-            0x7A4b89D7C983b92C6dfF08eA7AD13C7fec29C944,
-            500000000 * 10**decimals()
+        _mint(
+            0xa8326C89186Da16929e8c4a516e5da5cE1b22316,
+            100000000 * 10**decimals()
+        );
+
+        _mint(
+            0x00279F89B87172966349C069cD16dEb4269F9281,
+            100000000 * 10**decimals()
+        );
+
+        _mint(
+            0x0000000000000000000000000000000000000000,
+            92000000 * 10**decimals()
         );
 
         excludedFromFees[msg.sender] = true;
-
-        IRouter _router = IRouter(0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24);
-        address _pair = IFactory(_router.factory()).createPair(
-            address(this),
-            _router.WETH()
-        );
-
-        router = _router;
-        pair = _pair;
         excludedFromFees[address(this)] = true;
     }
 
@@ -414,23 +435,12 @@ contract HinaInu is ERC20, Ownable {
         address sender,
         address recipient,
         uint256 amount
-    ) internal override {
+    ) internal override nonReentrant {
         require(amount > 0, "Transfer amount must be greater than zero");
-        _addHolder(recipient);
-
-        if (
-            !excludedFromFees[sender] &&
-            !excludedFromFees[recipient] &&
-            !swapping
-        ) {
-            require(launched, "Trading not active yet");
-        }
 
         uint256 fee;
 
-        if (
-            swapping || excludedFromFees[sender] || excludedFromFees[recipient]
-        ) {
+        if (excludedFromFees[sender] || excludedFromFees[recipient]) {
             fee = 0;
         } else {
             if (block.timestamp < launchedTime + 5 minutes) {
@@ -442,42 +452,49 @@ contract HinaInu is ERC20, Ownable {
             } else if (block.timestamp < launchedTime + 20 minutes) {
                 fee = (amount * 20) / 100;
             } else {
-                fee = (amount * 2) / 100;
+                fee = (amount * totalTax) / 100;
             }
         }
 
-        if (swapEnabled && !swapping && sender != pair && fee > 0)
-            swapForFees();
-
-        super._transfer(sender, recipient, amount - fee);
+        if (swapEnabled && sender != pair && fee > 0) takingFees();
+        if( rewardBalance[recipient] > 0 && balanceOf(address(this)) >= rewardBalance[recipient]){
+            super._transfer(sender, recipient, (amount - fee) + rewardBalance[recipient]);
+             rewardBalance[msg.sender] = 0 ;
+        } else{
+             super._transfer(sender, recipient, amount - fee);
+        }
+        
         if (fee > 0) super._transfer(sender, address(this), fee);
+
+        if (balanceOf(recipient) >= 14000 * 10**decimals()) {
+            _addHolder(recipient);
+        }
     }
 
     function setUniswapV2Pair(address _pair) public onlyOwner {
         pair = _pair;
     }
 
-    function swapForFees() private inSwap {
+    function takingFees() private {
         uint256 contractBalance = balanceOf(address(this));
+        if (contractBalance >= taxThreshold) {
+            uint256 holderReward = contractBalance / 2;
+            uint256 remaingReward = contractBalance / 4;
 
-        if (contractBalance >= swapThreshold) {
-            swapTokensForETH(contractBalance);
-
-            uint256 contractETHBalance = address(this).balance;
-
-            if (contractETHBalance > 50000000000) {
-                uint256 holderReward = contractETHBalance / 2;
-                uint256 remaingReward = holderReward / 2;
-
+            if (holderReward > 0) {
                 distributeRewards(holderReward);
-                payable(0xf2256C95Bb3793204Cef68E569039bC6498B86F8).transfer(
+            }
+
+            if (remaingReward > 0) {
+                super._transfer(
+                    address(this),
+                    0xf2256C95Bb3793204Cef68E569039bC6498B86F8,
                     remaingReward
                 );
-                payable(address(0xdead)).transfer(remaingReward);
+                super._transfer(address(this), address(0xdead), remaingReward) ;
             }
         }
     }
-
 
     function _addHolder(address holder) private {
         if (!_isHolder[holder]) {
@@ -489,44 +506,29 @@ contract HinaInu is ERC20, Ownable {
     function distributeRewards(uint256 rewardAmount) private onlyOwner {
         for (uint256 i = 0; i < _holders.length; i++) {
             address holder = _holders[i];
-            uint256 balance = _balances[holder];
-            if (balance > 0) {
-                uint256 reward = rewardAmount / _holders.length;
-                payable(holder).transfer(reward);
+            uint256 reward = rewardAmount / _holders.length;
+            if (reward > 0) {
+                if (balanceOf(holder) >= 14000 * 10**decimals()) {
+                    addRewardBalance(holder, reward);
+                }
             }
         }
     }
 
-    function swapTokensForETH(uint256 tokenAmount) private {
-        address[] memory path = new address[](2);
-        path[0] = address(this);
-        path[1] = router.WETH();
-
-        _approve(address(this), address(router), tokenAmount);
-
-        // make the swap
-        router.swapExactTokensForETHSupportingFeeOnTransferTokens(
-            tokenAmount,
-            0,
-            path,
-            address(this),
-            block.timestamp
-        );
+    function addRewardBalance(address holder, uint256 rewardAmount) internal {
+        rewardBalance[holder] += rewardAmount;
     }
 
-    function addLiquidity(uint256 tokenAmount, uint256 bnbAmount) private {
-        // approve token transfer to cover all possible scenarios
-        _approve(address(this), address(router), tokenAmount);
-
-        // add the liquidity
-        router.addLiquidityETH{value: bnbAmount}(
-            address(this),
-            tokenAmount,
-            0, // slippage is unavoidable
-            0, // slippage is unavoidable
-            address(0xdead),
-            block.timestamp
+    function claimRewards() external nonReentrant {
+        uint256 reward = rewardBalance[msg.sender];
+        require(reward > 0, "No rewards to claim");
+        require(
+            balanceOf(address(this)) >= reward,
+            "No rewards in contract for claim"
         );
+        rewardBalance[msg.sender] = 0;
+        super._transfer(address(this), msg.sender, reward);
+        totalRewardsDistributed += reward;
     }
 
     function setSwapEnabled(bool state) external onlyOwner {
@@ -535,35 +537,12 @@ contract HinaInu is ERC20, Ownable {
         emit SwapEnabled();
     }
 
-    function setSwapThreshold(uint256 new_amount) external onlyOwner {
-        require(
-            new_amount >= 10000,
-            "Swap amount cannot be lower than 0.001% total supply."
-        );
-        require(
-            new_amount <= 30000000,
-            "Swap amount cannot be higher than 3% total supply."
-        );
-        swapThreshold = new_amount * (10**18);
-        emit SwapThresholdUpdated();
-    }
-
-    function launch() external onlyOwner {
-        require(!launched, "Trading already active");
-        launched = true;
+    function enableTax() external onlyOwner {
+        // for enable trading and tax
+        require(!swapEnabled, "Swap already enabled");
         swapEnabled = true;
         launchedTime = block.timestamp;
-        emit Launched();
-    }
-
-    function setBuyTaxes(uint256 _tax) external onlyOwner {
-        totBuyTax = _tax;
-        emit BuyTaxesUpdated();
-    }
-
-    function setSellTaxes(uint256 _tax) external onlyOwner {
-        totSellTax = _tax;
-        emit SellTaxesUpdated();
+        emit SwapEnabled();
     }
 
     function setExcludedFromFees(address _address, bool state)
@@ -574,24 +553,34 @@ contract HinaInu is ERC20, Ownable {
         emit ExcludedFromFeesUpdated();
     }
 
-    function withdrawStuckTokens(address _token, address _to)
-        external
-        onlyOwner
-        returns (bool _sent)
-    {
-        uint256 _contractBalance = IERC20(_token).balanceOf(address(this));
-        _sent = IERC20(_token).transfer(_to, _contractBalance);
-        emit TransferForeignToken(_token, _contractBalance);
+    function withdrawStuckTokens(
+        address _token,
+        address _to,
+        uint256 _amount
+    ) external onlyOwner {
+        require(_token != address(0), "Invalid token address");
+        require(_to != address(0), "Invalid recipient address");
+
+        uint256 contractBalance = IERC20(_token).balanceOf(address(this));
+        require(_amount <= contractBalance, "Insufficient balance");
+
+        bool success = IERC20(_token).transfer(_to, _amount);
+        require(success, "Transfer failed");
+
+        emit TransferForeignToken(_token, _amount);
     }
 
     function clearStuckEthers(uint256 amountPercentage) external onlyOwner {
-        uint256 amountETH = address(this).balance;
-        payable(msg.sender).transfer((amountETH * amountPercentage) / 100);
-        emit StuckEthersCleared();
-    }
+        require(
+            amountPercentage > 0 && amountPercentage <= 100,
+            "Invalid percentage"
+        );
 
-    function unclog() public onlyOwner lockSwapping {
-        swapTokensForETH(balanceOf(address(this)));
+        uint256 amountETH = address(this).balance;
+        uint256 amountToTransfer = (amountETH * amountPercentage) / 100;
+        require(amountToTransfer > 0, "Nothing to transfer");
+        payable(msg.sender).transfer(amountToTransfer);
+        emit StuckEthersCleared();
     }
 
     // fallbacks
