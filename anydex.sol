@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Unlicensed
 
-
-pragma solidity ^0.8.20;
-
+pragma solidity 0.8.20;
 
 interface ERC20 {
     function totalSupply() external view returns (uint256);
@@ -23,11 +21,6 @@ abstract contract Context {
     
     function _msgSender() internal view virtual returns (address payable) {
         return payable(msg.sender);
-    }
-
-    function _msgData() internal view virtual returns (bytes memory) {
-        this;
-        return msg.data;
     }
 }
 
@@ -51,7 +44,7 @@ contract Ownable is Context {
         _;
     }
 
-    function renounceOwnership() public virtual onlyOwner {
+    function renounceOwnership() external virtual onlyOwner {
         emit OwnershipTransferred(_owner, address(0));
         _owner = address(0);
     }
@@ -122,9 +115,8 @@ interface InterfaceLP {
 contract Anydex is Ownable, ERC20 {
 
     address WETH;
-    address DEAD = 0x000000000000000000000000000000000000dEaD;
-    address ZERO = 0x0000000000000000000000000000000000000000;
-    
+    address constant DEAD = 0x000000000000000000000000000000000000dEaD;
+    address constant ZERO = 0x0000000000000000000000000000000000000000;
 
     string constant _name = "Anydex";
     string constant _symbol = "ANYDEX";
@@ -134,7 +126,7 @@ contract Anydex is Ownable, ERC20 {
     uint256 _totalSupply = 10000000 * 10**_decimals;
 
     uint256 public _maxTxAmount = _totalSupply / 100;
-    uint256 public _maxWalletToken = _totalSupply / 100;
+    uint256 public _maxWalletAmount = _totalSupply / 100;
 
     mapping (address => uint256) _balances;
     mapping (address => mapping (address => uint256)) _allowances;
@@ -143,20 +135,17 @@ contract Anydex is Ownable, ERC20 {
     mapping (address => bool) isFeeExempt;
     mapping (address => bool) isTxLimitExempt;
 
-    uint256 private buyLiquidityFee    = 0;
     uint256 private buyMarketingFee    = 15;
     uint256 private buyTeamFee         = 10;
-    uint256 public  buyTotalFee        = buyTeamFee + buyMarketingFee + buyLiquidityFee;
+    uint256 public  buyTotalFee        = buyTeamFee + buyMarketingFee;
 
-    uint256 private sellLiquidityFee   = 0;
     uint256 private sellMarketingFee   = 15;
     uint256 private sellTeamFee        = 10;
-    uint256 public  sellTotalFee       = sellTeamFee + sellMarketingFee + sellLiquidityFee;
+    uint256 public  sellTotalFee       = sellTeamFee + sellMarketingFee;
 
     uint256 private transferFee        = 0;
     
     uint256 private lastSwap;
-    address private autoLiquidityReceiver;
     address private marketingFeeReceiver;
     address private teamFeeReceiver;
 
@@ -170,6 +159,16 @@ contract Anydex is Ownable, ERC20 {
     uint256 public swapThreshold = _totalSupply / 100; 
     bool inSwap;
     modifier swapping() { inSwap = true; _; inSwap = false; }
+
+    event maxWalletUpdated(uint256 indexed maxWalletAmount);
+    event maxTxUpdated(uint256 indexed maxTxAmount);
+    event maxLimitsRemoved(uint256 indexed maxWalletToken, uint256 indexed maxTxAmount);
+    event exemptFees(address indexed holder, bool indexed exempt);
+    event exemptTxLimit(address indexed holder, bool indexed exempt);
+    event buyFeesUpdated(uint256 indexed buyTeamFee, uint256 indexed buyMarketingFee);
+    event sellFeesUpdated(uint256 indexed sellTeamFee, uint256 indexed sellMarketingFee);
+    event feesWalletsUpdated(address indexed marketingFeeReceiver, address indexed teamFeeReceiver);
+    event swapbackSettingsUpdated(bool indexed enabled, uint256 indexed amount);
     
     constructor () {
         router = IDEXRouter(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D);
@@ -180,7 +179,6 @@ contract Anydex is Ownable, ERC20 {
         
         _allowances[address(this)][address(router)] = type(uint256).max;
 
-        autoLiquidityReceiver = msg.sender;
         marketingFeeReceiver = 0x38782F393d50700caE3e8Fb38C7611A2C417f23C;
         teamFeeReceiver = 0x70E37cD8e4790Aed78386a7DB8193A3BFdA98DD6;
 
@@ -234,13 +232,14 @@ contract Anydex is Ownable, ERC20 {
 
     function setMaxWallet(uint256 maxWalletPercent) external onlyOwner {
         require(maxWalletPercent >= 5);
-        _maxWalletToken = (_totalSupply * maxWalletPercent ) / 1000;
-                
+        _maxWalletAmount = (_totalSupply * maxWalletPercent ) / 1000;
+        emit maxWalletUpdated(_maxWalletAmount);       
     }
 
-    function setMaxTx(uint256 maxTXPercent) external onlyOwner {
-        require(maxTXPercent >= 5); 
-        _maxTxAmount = (_totalSupply * maxTXPercent ) / 1000;
+    function setMaxTx(uint256 maxTxPercent) external onlyOwner {
+        require(maxTxPercent >= 5); 
+        _maxTxAmount = (_totalSupply * maxTxPercent ) / 1000;
+        emit maxTxUpdated(_maxTxAmount);
     }
 
    
@@ -249,7 +248,7 @@ contract Anydex is Ownable, ERC20 {
 
         if(inSwap){ return _basicTransfer(sender, recipient, amount); }
 
-        if(!isTxLimitExempt[sender] && !isTxLimitExempt[recipient]){
+        if(sender != owner()){
             require(TradingOpen,"Trading not open yet");
         
            }
@@ -257,12 +256,18 @@ contract Anydex is Ownable, ERC20 {
        
         if (sender != owner() || (recipient != address(this)  && recipient != address(DEAD) && recipient != pair && recipient != marketingFeeReceiver && !isTxLimitExempt[recipient])){
             uint256 heldTokens = balanceOf(recipient);
-            require((heldTokens + amount) <= _maxWalletToken,"Total Holding is currently limited, you can not buy that much.");}
+            require((heldTokens + amount) <= _maxWalletAmount,"Total Holding is currently limited, you can not buy that much.");}
             
        
         checkTxLimit(sender, amount); 
 
-        if(shouldSwapBack()){ 
+        if(
+            lastSwap != block.number &&
+            _balances[address(this)] >= swapThreshold &&
+            swapEnabled &&
+            !inSwap &&
+            recipient == pair
+        ){ 
             swapBack();
             lastSwap = block.number;
             }
@@ -292,7 +297,7 @@ contract Anydex is Ownable, ERC20 {
     }
 
     function checkTxLimit(address sender, uint256 amount) internal view {
-        require(amount <= _maxTxAmount || isTxLimitExempt[sender], "TX Limit Exceeded");
+        require(amount <= _maxTxAmount || isTxLimitExempt[sender], "Tx Limit Exceeded");
     }
 
     function shouldTakeFee(address sender) internal view returns (bool) {
@@ -317,32 +322,19 @@ contract Anydex is Ownable, ERC20 {
         return notFeeAmount;
     }
 
-    function shouldSwapBack() internal view returns (bool) {
-        return msg.sender != pair
-        && !inSwap
-        && swapEnabled
-        && _balances[address(this)] >= swapThreshold
-        && lastSwap != block.number;
-    }
-
     function clearStuckETH(uint256 amountPercentage) external {
         require(isTxLimitExempt[msg.sender]);
         uint256 amountETH = address(this).balance;
         payable(msg.sender).transfer(amountETH * amountPercentage / 100);
     }
 
-    function swapback() external onlyOwner {
-        swapBack();
-    
-    }
-
     function removeMaxLimits() external onlyOwner { 
-        _maxWalletToken = _totalSupply;
+        _maxWalletAmount = _totalSupply;
         _maxTxAmount = _totalSupply;
-
+        emit maxLimitsRemoved(_maxWalletAmount, _maxTxAmount);
     }
 
-    function clearStuckToken(address tokenAddress, uint256 tokens) public returns (bool) {
+    function clearStuckToken(address tokenAddress, uint256 tokens) external returns (bool) {
         require(isTxLimitExempt[msg.sender]);
      if(tokens == 0){
             tokens = ERC20(tokenAddress).balanceOf(address(this));
@@ -351,7 +343,7 @@ contract Anydex is Ownable, ERC20 {
     }
 
 
-    function StartAnyDex() public onlyOwner {
+    function startAnyDex() external onlyOwner {
         require(!TradingOpen,"Trading already Enabled.");
         TradingOpen = true;
         lastSwap = block.number;
@@ -359,12 +351,10 @@ contract Anydex is Ownable, ERC20 {
 
     function swapBack() internal swapping {
         uint256 totalFee = buyTotalFee + sellTotalFee;
-        uint256 liquidityFee = buyLiquidityFee + sellLiquidityFee;
         uint256 marketingFee = buyMarketingFee + sellMarketingFee;
         uint256 teamFee = buyTeamFee + sellTeamFee;
 
-        uint256 amountToLiquify = ((swapThreshold * liquidityFee) / totalFee) / 2;
-        uint256 amountToSwap = swapThreshold - amountToLiquify;
+        uint256 amountToSwap = swapThreshold;
 
         address[] memory path = new address[](2);
         path[0] = address(this);
@@ -378,76 +368,63 @@ contract Anydex is Ownable, ERC20 {
             block.timestamp
         );
 
-        uint256 amountETH = address(this).balance;
-
-        uint256 totalETHFee = totalFee - (liquidityFee / 2);
-        
-        uint256 amountETHLiquidity = (amountETH * liquidityFee) / (totalETHFee * 2);
-        uint256 amountETHMarketing = (amountETH * marketingFee) / totalETHFee;
-        uint256 amountETHteam = (amountETH * teamFee) / totalETHFee;
+        uint256 totalETHFee = address(this).balance;
+        uint256 amountETHMarketing = (totalETHFee * marketingFee) / totalFee;
+        uint256 amountETHteam = (totalETHFee * teamFee) / totalFee;
 
         (bool tmpSuccess,) = payable(marketingFeeReceiver).call{value: amountETHMarketing}("");
         (tmpSuccess,) = payable(teamFeeReceiver).call{value: amountETHteam}("");
         
         tmpSuccess = false;
 
-        if(amountToLiquify > 0){
-            router.addLiquidityETH{value: amountETHLiquidity}(
-                address(this),
-                amountToLiquify,
-                0,
-                0,
-                autoLiquidityReceiver,
-                block.timestamp
-            );
-            emit AutoLiquify(amountETHLiquidity, amountToLiquify);
-        }
     }
 
     function exemptAll(address holder, bool exempt) external onlyOwner {
+        require(holder != address(0), "Holder is the zero address");
         isFeeExempt[holder] = exempt;
         isTxLimitExempt[holder] = exempt;
+        emit exemptFees(holder, exempt);
     }
 
     function setTxLimitExempt(address holder, bool exempt) external onlyOwner {
+        require(holder != address(0), "Holder is the zero address");
         isTxLimitExempt[holder] = exempt;
+        emit exemptTxLimit(holder, exempt);
     }
 
 
-    function updateBuyFees(uint256 _liquidityFee, uint256 _teamFee, uint256 _marketingFee) external onlyOwner {
-        require(_liquidityFee + _teamFee+ _marketingFee < 30, "Fees can not be more than 30%"); 
-        buyLiquidityFee = _liquidityFee;
+    function updateBuyFees(uint256 _teamFee, uint256 _marketingFee) external onlyOwner {
+        require( _teamFee + _marketingFee < 30, "Fees can not be more than 30%"); 
         buyTeamFee = _teamFee;
         buyMarketingFee = _marketingFee;
-        buyTotalFee = _liquidityFee + _teamFee+ _marketingFee;
+        buyTotalFee =_teamFee+ _marketingFee;
+        emit buyFeesUpdated(buyTeamFee, buyMarketingFee);
     }
 
-    function updateSellFees(uint256 _liquidityFee, uint256 _teamFee, uint256 _marketingFee) external onlyOwner {
-        require(_liquidityFee + _teamFee+ _marketingFee < 30, "Fees can not be more than 30%"); 
-        sellLiquidityFee = _liquidityFee;
+    function updateSellFees(uint256 _teamFee, uint256 _marketingFee) external onlyOwner {
+        require(_teamFee + _marketingFee < 30, "Fees can not be more than 30%"); 
         sellTeamFee = _teamFee;
         sellMarketingFee = _marketingFee;
-        sellTotalFee = _liquidityFee + _teamFee+ _marketingFee;
+        sellTotalFee =_teamFee+ _marketingFee;
+        emit sellFeesUpdated(sellTeamFee, sellMarketingFee);
     }
 
-    function updateReceiverWallets(address _autoLiquidityReceiver, address _marketingFeeReceiver, address _teamFeeReceiver) external onlyOwner {
-        autoLiquidityReceiver = _autoLiquidityReceiver;
+    function updateReceiverWallets( address _marketingFeeReceiver, address _teamFeeReceiver) external onlyOwner {
+        require(_marketingFeeReceiver != address(0) && _teamFeeReceiver != address(0) , "Fee receiver cannot be zero address");
         marketingFeeReceiver = _marketingFeeReceiver;
         teamFeeReceiver = _teamFeeReceiver;
+        emit feesWalletsUpdated(marketingFeeReceiver, teamFeeReceiver);
     }
 
     function editSwapbackSettings(bool _enabled, uint256 _amount) external onlyOwner {
         swapEnabled = _enabled;
         swapThreshold = _amount * 10**_decimals;
+        emit swapbackSettingsUpdated(_enabled, _amount);
     }
 
     
     function getCirculatingSupply() public view returns (uint256) {
         return _totalSupply - balanceOf(DEAD)- balanceOf(ZERO);
     }
-
-
-
-event AutoLiquify(uint256 amountETH, uint256 amountTokens);
 
 }
