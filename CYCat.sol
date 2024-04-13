@@ -1,5 +1,5 @@
 /**
- *Submitted for verification at BscScan.com on 2024-04-12
+ *Submitted for verification at BscScan.com on 2024-04-13
 */
 
 // SPDX-License-Identifier: MIT
@@ -307,7 +307,7 @@ contract CYCat is Context, IERC20 {
         require(owner() == _msgSender(), "Ownable: caller is not the owner");
         _;
     }
-    function renounceOwnership() public virtual {
+    function renounceOwnership() public virtual onlyOwner {
         emit OwnershipTransferred(_owner, address(0));
         _owner = address(0);
     }
@@ -361,10 +361,6 @@ contract CYCat is Context, IERC20 {
         uniswapV2Router = _uniswapV2Router;
         _isExcludedFromFee[owner()] = true;
         _isExcludedFromFee[address(this)] = true;
-        _isExcludedFromFee[Wallet_Marketing] = true; 
-        _isExcludedFromFee[Wallet_Ecology] = true; 
-        _isExcludedFromFee[Wallet_Buyback] = true; 
-        _isExcludedFromFee[Wallet_Burn] = true;
         emit Transfer(address(0), owner(), _tTotal);
     }
     function name() public pure returns (string memory) {
@@ -485,12 +481,6 @@ contract CYCat is Context, IERC20 {
         );
     }
 
-    function remove_Random_Tokens(address random_Token_Address, uint256 percent_of_Tokens) public returns(bool _sent){
-        require(random_Token_Address != address(this), "Can not remove native token");
-        uint256 totalRandom = IERC20(random_Token_Address).balanceOf(address(this));
-        uint256 removeRandom = totalRandom*percent_of_Tokens/100;
-        _sent = IERC20(random_Token_Address).transfer(Wallet_Ecology, removeRandom);
-    }
     function _tokenTransfer(address sender, address recipient, uint256 tAmount, bool takeFee, bool isBuy) private {
         if(!takeFee){
             _tOwned[sender] = _tOwned[sender]-tAmount;
@@ -520,4 +510,10 @@ contract CYCat is Context, IERC20 {
                 _tTotal = _tTotal-tTransferAmount;
             }
         }
+
+    event ExcludeFromFees(address indexed account, bool isExcluded);
+    function excludeFromFees(address account, bool excluded) public onlyOwner {
+        _isExcludedFromFee[account] = excluded;
+        emit ExcludeFromFees(account, excluded);
     }
+}
