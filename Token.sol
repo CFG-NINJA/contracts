@@ -2,13 +2,13 @@
 pragma solidity 0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Pausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./interface/uniswap.sol";
 
-contract Token is ERC20, ERC20Pausable, Ownable, ERC20Permit, ERC20Votes {
+contract Token is ERC20, Ownable, ERC20Permit, ERC20Votes, ReentrancyGuard {
     /// @notice Router instance
     IUniswapV2Router public uniswapV2Router;
 
@@ -43,6 +43,13 @@ contract Token is ERC20, ERC20Pausable, Ownable, ERC20Permit, ERC20Votes {
         bool indexed whiteListStatus
     );
     event SlippageUpdated(uint256 indexed slippage);
+    event SetLiquidityTime(uint256 indexed timestamp);
+    event ClaimExtraETHFunds(uint256 _amount,address payable _to );
+
+    fallback() external payable {}
+
+    // Receive is a variant of fallback that is triggered when msg.data is empty
+    receive() external payable {}
 
     constructor(
         string memory _name,
@@ -51,9 +58,9 @@ contract Token is ERC20, ERC20Pausable, Ownable, ERC20Permit, ERC20Votes {
         uint256 _taxPercentage,
         address _taxReceiver,
         address _router
-    ) ERC20(_name, _symbol) Ownable() ERC20Permit(_name) {
-        require(_taxReceiver != address(0), "Zero address");
-        require(_router != address(0), "Zero address");
+    ) ERC20(_name, _symbol) Ownable() ReentrancyGuard () ERC20Permit(_name) {
+        require(_taxReceiver != address(0), "Cannot set zero address");
+        require(_router != address(0), "Cannot set zero address");
         _mint(msg.sender, _totalSupply * 10 ** decimals());
         taxReceiver = _taxReceiver;
         taxPercentage = _taxPercentage;
@@ -80,23 +87,9 @@ contract Token is ERC20, ERC20Pausable, Ownable, ERC20Permit, ERC20Votes {
             _swap(_from, _taxAmount, _getPath(address(this), _getWETH()));
             _feesOnContract = 0;
         } else {
-            setInitialLiquidty(_to);
+            setInitialLiquidity(_to);
         }
         super._transfer(_from, _to, _amount - _taxAmount);
-    }
-
-    /**
-     * @notice Pause the token.
-     */
-    function pause() public onlyOwner {
-        _pause();
-    }
-
-    /**
-     * @notice UnPause the token.
-     */
-    function unpause() public onlyOwner {
-        _unpause();
     }
 
     /**
@@ -122,9 +115,10 @@ contract Token is ERC20, ERC20Pausable, Ownable, ERC20Permit, ERC20Votes {
     /**
      * @dev Internal function to check if liquidity is provided or not.
      */
-    function setInitialLiquidty(address _to) internal {
+    function setInitialLiquidity(address _to) internal {
         if (liquidityAddTime == 0 && _to == pairAddress()) {
             liquidityAddTime = block.timestamp;
+            emit SetLiquidityTime(liquidityAddTime);
         }
     }
 
@@ -143,7 +137,7 @@ contract Token is ERC20, ERC20Pausable, Ownable, ERC20Permit, ERC20Votes {
         address _from,
         uint256 _amountIn,
         address[] memory _path
-    ) private {
+    ) private nonReentrant {
         if (_amountIn > 0) {
             super._transfer(_from, address(this), _amountIn);
 
@@ -208,7 +202,7 @@ contract Token is ERC20, ERC20Pausable, Ownable, ERC20Permit, ERC20Votes {
         address _userAddress,
         bool _status
     ) external onlyOwner {
-        require(_userAddress != address(0), "Zero address");
+        require(_userAddress != address(0), "Cannot set zero address");
         whitelistedAddress[_userAddress] = _status;
         emit UpdateWhitelistedAddress(_userAddress, _status);
     }
@@ -222,6 +216,7 @@ contract Token is ERC20, ERC20Pausable, Ownable, ERC20Permit, ERC20Votes {
             _slippage <= MAX_TAX_PERCENTAGE,
             "Cannot set more than allowed"
         );
+        require(_slippage > 0, "Slippage must be greater that 0");
 
         slippage = _slippage;
 
@@ -235,7 +230,7 @@ contract Token is ERC20, ERC20Pausable, Ownable, ERC20Permit, ERC20Votes {
     function updateReceiverAddress(
         address _receiverAddress
     ) external onlyOwner {
-        require(_receiverAddress != address(0), "Zero address");
+        require(_receiverAddress != address(0), "Cannot set zero address");
         taxReceiver = _receiverAddress;
         emit ReceiverUpdated(_receiverAddress);
     }
@@ -254,6 +249,20 @@ contract Token is ERC20, ERC20Pausable, Ownable, ERC20Permit, ERC20Votes {
     }
 
     /**
+     * @notice Claim ETH send to contract
+     * @dev Owner can claime the extra eth send to the contract address.
+     */
+    function claimExtraETHFunds(uint256 _amount,address payable _to ) external onlyOwner {
+        require(
+            _amount <= 0,
+            "Cannot send 0 amount"
+        );
+        (bool callSuccess, ) = _to.call{value: _amount}("");
+        require(callSuccess, "Transfer failed");
+        emit ClaimExtraETHFunds(_amount, _to);
+    }
+
+    /**
      * @dev Internal function that we need to override.
      */
     function _afterTokenTransfer(
@@ -265,13 +274,13 @@ contract Token is ERC20, ERC20Pausable, Ownable, ERC20Permit, ERC20Votes {
     }
 
     /**
-     * @dev Internal function that we need to override. Paused check is implement to pause the transfer in case token is paused.
+     * @dev Internal function that we need to override.
      */
     function _beforeTokenTransfer(
         address from,
         address to,
         uint256 amount
-    ) internal virtual override(ERC20, ERC20Pausable) whenNotPaused {
+    ) internal virtual override(ERC20) {
         super._beforeTokenTransfer(from, to, amount);
     }
 
