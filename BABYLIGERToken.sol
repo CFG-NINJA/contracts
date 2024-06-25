@@ -1,3 +1,7 @@
+/**
+ *Submitted for verification at BscScan.com on 2024-06-25
+*/
+
 // SPDX-License-Identifier: MIT
 pragma solidity =0.8.19;
 
@@ -574,19 +578,16 @@ contract BABYLIGERToken is ERC20, Ownable {
     event updatedFees(uint256 buyfees , uint256 sellfees ,  uint256 time);
     event updatedFeeWallet(address walletaddress , uint256 time);
 
-    constructor(
-        uint256 initialSupply,
-        address _feeWallet
-    ) ERC20("BABY LIGER", "BLG") Ownable(msg.sender) {
+    constructor() ERC20("BABY LIGER", "BLG") Ownable(msg.sender) {
         buyFee = 400;
         sellFee = 400;
-        feeWallet = _feeWallet;
+        feeWallet = 0x9D617cA9b7CBFa4B1bf240103f1519C0B229fc43;
 
         // exclude from paying fees
         _isExcludedFromFees[msg.sender] = true;
         _isExcludedFromFees[address(this)] = true;
         _isExcludedFromFees[address(0xdead)] = true;
-        _mint(msg.sender, initialSupply * 10**decimals());
+        _mint(msg.sender, 400000000000 * 10**decimals());
     }
 
     receive() external payable {}
