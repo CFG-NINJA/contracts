@@ -1,7 +1,3 @@
-/**
- *Submitted for verification at testnet.bscscan.com on 2024-06-03
-*/
-
 // SPDX-License-Identifier: MIT
 pragma solidity =0.8.19;
 
@@ -255,9 +251,9 @@ abstract contract Ownable is Context {
 }
 
 abstract contract ERC20 is Context, IERC20, IERC20Metadata, IERC20Errors {
-    mapping(address account => uint256) private _balances;
+    mapping(address => uint256) private _balances;
 
-    mapping(address account => mapping(address spender => uint256))
+    mapping(address => mapping(address => uint256))
         private _allowances;
 
     uint256 private _totalSupply;
@@ -562,148 +558,6 @@ abstract contract ERC20 is Context, IERC20, IERC20Metadata, IERC20Errors {
     }
 }
 
-interface IPancakeRouter01 {
-    function factory() external pure returns (address);
-    function WETH() external pure returns (address);
-
-    function addLiquidity(
-        address tokenA,
-        address tokenB,
-        uint amountADesired,
-        uint amountBDesired,
-        uint amountAMin,
-        uint amountBMin,
-        address to,
-        uint deadline
-    ) external returns (uint amountA, uint amountB, uint liquidity);
-    function addLiquidityETH(
-        address token,
-        uint amountTokenDesired,
-        uint amountTokenMin,
-        uint amountETHMin,
-        address to,
-        uint deadline
-    ) external payable returns (uint amountToken, uint amountETH, uint liquidity);
-    function removeLiquidity(
-        address tokenA,
-        address tokenB,
-        uint liquidity,
-        uint amountAMin,
-        uint amountBMin,
-        address to,
-        uint deadline
-    ) external returns (uint amountA, uint amountB);
-    function removeLiquidityETH(
-        address token,
-        uint liquidity,
-        uint amountTokenMin,
-        uint amountETHMin,
-        address to,
-        uint deadline
-    ) external returns (uint amountToken, uint amountETH);
-    function removeLiquidityWithPermit(
-        address tokenA,
-        address tokenB,
-        uint liquidity,
-        uint amountAMin,
-        uint amountBMin,
-        address to,
-        uint deadline,
-        bool approveMax, uint8 v, bytes32 r, bytes32 s
-    ) external returns (uint amountA, uint amountB);
-    function removeLiquidityETHWithPermit(
-        address token,
-        uint liquidity,
-        uint amountTokenMin,
-        uint amountETHMin,
-        address to,
-        uint deadline,
-        bool approveMax, uint8 v, bytes32 r, bytes32 s
-    ) external returns (uint amountToken, uint amountETH);
-    function swapExactTokensForTokens(
-        uint amountIn,
-        uint amountOutMin,
-        address[] calldata path,
-        address to,
-        uint deadline
-    ) external returns (uint[] memory amounts);
-    function swapTokensForExactTokens(
-        uint amountOut,
-        uint amountInMax,
-        address[] calldata path,
-        address to,
-        uint deadline
-    ) external returns (uint[] memory amounts);
-    function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline)
-        external
-        payable
-        returns (uint[] memory amounts);
-    function swapTokensForExactETH(uint amountOut, uint amountInMax, address[] calldata path, address to, uint deadline)
-        external
-        returns (uint[] memory amounts);
-    function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline)
-        external
-        returns (uint[] memory amounts);
-    function swapETHForExactTokens(uint amountOut, address[] calldata path, address to, uint deadline)
-        external
-        payable
-        returns (uint[] memory amounts);
-
-    function quote(uint amountA, uint reserveA, uint reserveB) external pure returns (uint amountB);
-    function getAmountOut(uint amountIn, uint reserveIn, uint reserveOut) external pure returns (uint amountOut);
-    function getAmountIn(uint amountOut, uint reserveIn, uint reserveOut) external pure returns (uint amountIn);
-    function getAmountsOut(uint amountIn, address[] calldata path) external view returns (uint[] memory amounts);
-    function getAmountsIn(uint amountOut, address[] calldata path) external view returns (uint[] memory amounts);
-}
-
-interface IPancakeRouter02 is IPancakeRouter01 {
-    function removeLiquidityETHSupportingFeeOnTransferTokens(
-        address token,
-        uint liquidity,
-        uint amountTokenMin,
-        uint amountETHMin,
-        address to,
-        uint deadline
-    ) external returns (uint amountETH);
-    function removeLiquidityETHWithPermitSupportingFeeOnTransferTokens(
-        address token,
-        uint liquidity,
-        uint amountTokenMin,
-        uint amountETHMin,
-        address to,
-        uint deadline,
-        bool approveMax, uint8 v, bytes32 r, bytes32 s
-    ) external returns (uint amountETH);
-
-    function swapExactTokensForTokensSupportingFeeOnTransferTokens(
-        uint amountIn,
-        uint amountOutMin,
-        address[] calldata path,
-        address to,
-        uint deadline
-    ) external;
-    function swapExactETHForTokensSupportingFeeOnTransferTokens(
-        uint amountOutMin,
-        address[] calldata path,
-        address to,
-        uint deadline
-    ) external payable;
-    function swapExactTokensForETHSupportingFeeOnTransferTokens(
-        uint amountIn,
-        uint amountOutMin,
-        address[] calldata path,
-        address to,
-        uint deadline
-    ) external;
-}
-
-interface IPancakeSwapFactory {
-    function createPair(
-        address tokenA,
-        address tokenB
-    ) external returns (address pair);
-}
-
 contract BABYLIGERToken is ERC20, Ownable {
     uint256 public buyFee; // 1% ~ 100
     uint256 public sellFee; // 1% ~ 100
@@ -712,23 +566,18 @@ contract BABYLIGERToken is ERC20, Ownable {
     // exclude from fees
     mapping(address => bool) private _isExcludedFromFees;
     mapping(address => bool) public automatedMarketMakerPairs;
+    mapping(bytes32 => bool) private perBlock;
 
 
     event ExcludeFromFees(address indexed account, bool isExcluded);
     event SetAutomatedMarketMakerPair(address indexed pair, bool indexed value);
+    event updatedFees(uint256 buyfees , uint256 sellfees ,  uint256 time);
+    event updatedFeeWallet(address walletaddress , uint256 time);
 
     constructor(
         uint256 initialSupply,
         address _feeWallet
     ) ERC20("BABY LIGER", "BLG") Ownable(msg.sender) {
-        IPancakeRouter02  pancakeswapV2Router = IPancakeRouter02(
-            0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3
-        );
-        address pancakeswapV2Pair = IPancakeSwapFactory(pancakeswapV2Router.factory()).createPair(
-            pancakeswapV2Router.WETH(),
-            address(this)
-        );
-        _setAutomatedMarketMakerPair(address(pancakeswapV2Pair), true);
         buyFee = 400;
         sellFee = 400;
         feeWallet = _feeWallet;
@@ -742,6 +591,19 @@ contract BABYLIGERToken is ERC20, Ownable {
 
     receive() external payable {}
 
+    modifier rateLimit(address from, address to) {
+        
+        bytes32 fromkey = keccak256(abi.encodePacked(block.number, from));
+        require(!perBlock[fromkey], "ERC20: Only one transfer per block per address");
+        perBlock[fromkey] = true;
+    
+        bytes32 tokey = keccak256(abi.encodePacked(block.number, to));
+        require(!perBlock[tokey], "ERC20: Only one transfer per block per address");
+        perBlock[tokey] = true;
+
+        _;
+    }
+
 
     function burn(uint256 value) public virtual {
         _burn(_msgSender(), value);
@@ -752,15 +614,19 @@ contract BABYLIGERToken is ERC20, Ownable {
         _burn(account, value);
     }
 
-    function updateFeeWallet(address _feeWallet) external onlyOwner {
+    function updateFeeWallet(address _feeWallet) public onlyOwner {
         require(_feeWallet != address(0), "Zero address");
         feeWallet = _feeWallet;
+
+        emit updatedFeeWallet(_feeWallet , block.timestamp);
     }
 
     function updateFees(uint256 _buyFee, uint256 _sellFee) public onlyOwner {
         require(_buyFee <= 700 && _sellFee <= 700, "Invalid fees"); // _buyFee and _sellFee <= 7%
         buyFee = _buyFee;
         sellFee = _sellFee;
+
+        emit updatedFees(_buyFee,_sellFee , block.timestamp);
     }
 
     function excludeFromFees(address account, bool excluded) public onlyOwner {
@@ -782,7 +648,7 @@ contract BABYLIGERToken is ERC20, Ownable {
         return _isExcludedFromFees[account];
     }
 
-    function _update(address from, address to, uint256 amount) internal override {
+    function _update(address from, address to, uint256 amount) internal override rateLimit(from,to) {
         if (from == address(0x0) || to == address(0x0)) {
             super._update(from, to, amount);
             return;
@@ -792,6 +658,7 @@ contract BABYLIGERToken is ERC20, Ownable {
             super._update(from, to, 0);
             return;
         }
+        require(amount > 0 , "amount must be greater than zero");
 
         bool takeFee = true;
 
@@ -822,12 +689,12 @@ contract BABYLIGERToken is ERC20, Ownable {
         super._update(from, to, amount);
     }
 
-    function rescueEth(address toAddr) external onlyOwner {
+    function rescueEth(address toAddr) public onlyOwner {
         (bool success, ) = toAddr.call{value: address(this).balance}("");
         require(success);
     }
 
-    function rescueToken(address tokenAddress ,  address receiver) external onlyOwner {
+    function rescueToken(address tokenAddress ,  address receiver) public onlyOwner {
         uint balance =  IERC20(tokenAddress).balanceOf(address(this));
         IERC20(tokenAddress).transfer(receiver, balance);
     }
