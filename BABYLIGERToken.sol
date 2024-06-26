@@ -1,7 +1,3 @@
-/**
- *Submitted for verification at BscScan.com on 2024-06-25
-*/
-
 // SPDX-License-Identifier: MIT
 pragma solidity =0.8.19;
 
@@ -255,9 +251,9 @@ abstract contract Ownable is Context {
 }
 
 abstract contract ERC20 is Context, IERC20, IERC20Metadata, IERC20Errors {
-    mapping(address => uint256) private _balances;
+    mapping(address account => uint256) private _balances;
 
-    mapping(address => mapping(address => uint256))
+    mapping(address account => mapping(address spender => uint256))
         private _allowances;
 
     uint256 private _totalSupply;
@@ -570,7 +566,6 @@ contract BABYLIGERToken is ERC20, Ownable {
     // exclude from fees
     mapping(address => bool) private _isExcludedFromFees;
     mapping(address => bool) public automatedMarketMakerPairs;
-    mapping(bytes32 => bool) private perBlock;
 
 
     event ExcludeFromFees(address indexed account, bool isExcluded);
@@ -578,32 +573,22 @@ contract BABYLIGERToken is ERC20, Ownable {
     event updatedFees(uint256 buyfees , uint256 sellfees ,  uint256 time);
     event updatedFeeWallet(address walletaddress , uint256 time);
 
-    constructor() ERC20("BABY LIGER", "BLG") Ownable(msg.sender) {
+    constructor(
+        uint256 initialSupply,
+        address _feeWallet
+    ) ERC20("BABY LIGER", "BLG") Ownable(msg.sender) {
         buyFee = 400;
         sellFee = 400;
-        feeWallet = 0x9D617cA9b7CBFa4B1bf240103f1519C0B229fc43;
+        feeWallet = _feeWallet;
 
         // exclude from paying fees
         _isExcludedFromFees[msg.sender] = true;
         _isExcludedFromFees[address(this)] = true;
         _isExcludedFromFees[address(0xdead)] = true;
-        _mint(msg.sender, 400000000000 * 10**decimals());
+        _mint(msg.sender, initialSupply * 10**decimals());
     }
 
     receive() external payable {}
-
-    modifier rateLimit(address from, address to) {
-        
-        bytes32 fromkey = keccak256(abi.encodePacked(block.number, from));
-        require(!perBlock[fromkey], "ERC20: Only one transfer per block per address");
-        perBlock[fromkey] = true;
-    
-        bytes32 tokey = keccak256(abi.encodePacked(block.number, to));
-        require(!perBlock[tokey], "ERC20: Only one transfer per block per address");
-        perBlock[tokey] = true;
-
-        _;
-    }
 
 
     function burn(uint256 value) public virtual {
@@ -649,18 +634,13 @@ contract BABYLIGERToken is ERC20, Ownable {
         return _isExcludedFromFees[account];
     }
 
-    function _update(address from, address to, uint256 amount) internal override rateLimit(from,to) {
+    function _update(address from, address to, uint256 amount) internal override {
         if (from == address(0x0) || to == address(0x0)) {
             super._update(from, to, amount);
             return;
         }
-
-        if (amount == 0) {
-            super._update(from, to, 0);
-            return;
-        }
         require(amount > 0 , "amount must be greater than zero");
-
+        
         bool takeFee = true;
 
         // if any account belongs to _isExcludedFromFee account then remove the fee
