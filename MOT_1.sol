@@ -2,12 +2,13 @@
 pragma solidity ^0.8.22;
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {OAppSender, MessagingFee} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
 import {OAppReceiver, Origin} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppReceiver.sol";
 import {OptionsBuilder} from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OptionsBuilder.sol";
 import {OAppCore} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppCore.sol";
 
-contract Xmore is ERC20, Ownable, OAppSender, OAppReceiver {
+contract MOT_1 is ERC20, Ownable, ReentrancyGuard, OAppSender, OAppReceiver {
     using OptionsBuilder for bytes;
 
     enum ActionType {
@@ -29,7 +30,10 @@ contract Xmore is ERC20, Ownable, OAppSender, OAppReceiver {
 
     // Custom Events
 
+    event RefundFailed();
     event MessageSent(string message, uint32 dstEid);
+    event MintDisabled();
+    event MintEnabled();
     event MessageReceived(
         string message,
         uint32 senderEid,
@@ -106,15 +110,15 @@ contract Xmore is ERC20, Ownable, OAppSender, OAppReceiver {
         uint256[4] memory _maxSupplies,
         uint256[4] memory _mintQuantityPerPool
     )
+        Ownable(msg.sender)
         ERC20(_name, _symbol)
-        Ownable(_initialOwner)
         OAppCore(_lzEndpoint, _initialOwner)
     {
         unifiedMaxSupply = _unifiedMaxSupply * (10 ** decimals());
 
         oracleFee = 20000000000;
 
-        oracle = _initialOwner;
+        oracle = msg.sender;
 
         uint256 totalMaxSupply = 0;
 
@@ -179,7 +183,7 @@ contract Xmore is ERC20, Ownable, OAppSender, OAppReceiver {
         address _to,
         uint256 _amount,
         uint128 _executorGas
-    ) external payable {
+    ) external payable nonReentrant {
         if (msg.value == 0) {
             revert InvalidAmount();
         }
@@ -290,11 +294,11 @@ contract Xmore is ERC20, Ownable, OAppSender, OAppReceiver {
 
         uint256 mintPrice = poolsInfo[_poolNumber].mintPrice;
 
-        if (msg.value < (mintPrice + oracleFee)) {
+        if (msg.value < mintPrice) {
             revert MintPriceNotMet();
         }
 
-        uint256 value = msg.value - oracleFee;
+        uint256 value = msg.value;
 
         uint256 mintAmount = _getMintAmount(value, mintPrice);
 
@@ -325,20 +329,6 @@ contract Xmore is ERC20, Ownable, OAppSender, OAppReceiver {
 
         uint256 mintValue = (mintAmount / (10 ** decimals())) * mintPrice;
 
-        uint256 oracleFund = msg.value - value;
-
-        if (
-            oracle != address(0) &&
-            oracleFund > 0 &&
-            oracleFund <= address(this).balance
-        ) {
-            (bool success, ) = oracle.call{value: oracleFund}("");
-
-            if (!success) {
-                revert OracleFundingFailed();
-            }
-        }
-
         if (refundEnabled) {
             uint256 refund = value - mintValue;
 
@@ -346,7 +336,7 @@ contract Xmore is ERC20, Ownable, OAppSender, OAppReceiver {
                 (bool success, ) = msg.sender.call{value: refund}("");
 
                 if (!success) {
-                    revert RefundTransferFailed();
+                    emit RefundFailed();
                 }
             }
         }
@@ -473,7 +463,7 @@ contract Xmore is ERC20, Ownable, OAppSender, OAppReceiver {
                 (bool success, ) = _minter.call{value: refundAmount}("");
 
                 if (!success) {
-                    revert RefundTransferFailed();
+                    emit RefundFailed();
                 }
 
                 emit UnsoldTokensRefunded(_minter, refundAmount);
@@ -570,7 +560,7 @@ contract Xmore is ERC20, Ownable, OAppSender, OAppReceiver {
                         (bool success, ) = minter.call{value: refundAmount}("");
 
                         if (!success) {
-                            revert RefundTransferFailed();
+                            emit RefundFailed();
                         }
 
                         emit UnsoldTokensRefunded(minter, refundAmount);
@@ -599,7 +589,7 @@ contract Xmore is ERC20, Ownable, OAppSender, OAppReceiver {
         address[][4] memory _invalidMinters,
         address[][4] memory _newMinters
     ) external {
-        if (oracle != address(0) && msg.sender != oracle) {
+        if (msg.sender != oracle) {
             revert UnauthorizedParty();
         }
 
@@ -626,6 +616,10 @@ contract Xmore is ERC20, Ownable, OAppSender, OAppReceiver {
     ) external {
         // Only update if the amount is different
 
+        if (msg.sender != oracle) {
+            revert UnauthorizedParty();
+        }
+
         uint256 _amount = _amounts[0] + _amounts[1] + _amounts[2] + _amounts[3];
 
         bool isEqual = (_amounts[0] == unifiedPoolsTotalMinted[1] &&
@@ -640,10 +634,6 @@ contract Xmore is ERC20, Ownable, OAppSender, OAppReceiver {
         // if (_amount > unifiedMaxSupply) {
         //     revert UnifiedMaxSupplyReached();
         // }
-
-        if (oracle != address(0) && msg.sender != oracle) {
-            revert UnauthorizedParty();
-        }
 
         // update each pool if the amount is different
 
@@ -678,7 +668,7 @@ contract Xmore is ERC20, Ownable, OAppSender, OAppReceiver {
         uint32 _dstEid,
         bytes memory _encodedMessage,
         uint128 _executorGas
-    ) external payable {
+    ) external payable nonReentrant {
         if (msg.value == 0) {
             revert InvalidAmount();
         }
@@ -780,7 +770,7 @@ contract Xmore is ERC20, Ownable, OAppSender, OAppReceiver {
             (bool success, ) = _minter.call{value: refundAmount}("");
 
             if (!success) {
-                revert RefundTransferFailed();
+                emit RefundFailed();
             }
 
             emit UnsoldTokensRefunded(_minter, refundAmount);
@@ -831,6 +821,8 @@ contract Xmore is ERC20, Ownable, OAppSender, OAppReceiver {
         uint256 _mintPrice,
         uint256 _maxSupply
     ) public onlyOwner {
+        require(_maxSupply > 0, "Max Supply must be greather than zero");
+
         if (_poolNumber < 1 || _poolNumber > 4) {
             revert InvalidPoolNumber();
         }
@@ -845,6 +837,12 @@ contract Xmore is ERC20, Ownable, OAppSender, OAppReceiver {
 
     function setMintingEnabled(bool _mintingEnabled) public onlyOwner {
         mintingEnabled = _mintingEnabled;
+
+        if (_mintingEnabled) {
+            emit MintEnabled();
+        } else {
+            emit MintDisabled();
+        }
     }
 
     function setAllowLocalTransfer(bool _allowLocalTransfer) public onlyOwner {
@@ -856,6 +854,8 @@ contract Xmore is ERC20, Ownable, OAppSender, OAppReceiver {
     }
 
     function withdraw() public onlyOwner {
+        require(owner() != address(0), "Recipient cannot be zero address");
+
         (bool success, ) = owner().call{value: address(this).balance}("");
 
         if (!success) {
